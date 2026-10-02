@@ -51,15 +51,13 @@ AI-Terminal-X is powered by  **Google’s Gemini AI** , making it **exceptionall
 
 ✅ **Multi-layer risk check** to ensure safe execution of commands
 
-✅ **Customizable aliases** for faster command execution
-
-✅ **Interactive Mode** — Review, edit, or cancel commands before execution
+✅ **Interactive Mode** - Review, copy, or cancel commands before execution
 
 ✅ **Real-time feedback and explanations** for commands
 
 ✅ **Smart back navigation** between different modes
 
-✅ **Command history** to easily reuse previous inputs
+✅ **Command logging**: every executed command is saved to `ai_cmd_x_history.log` for review
 
 ✅ **Efficient learning mode** — Ask questions and get beginner-friendly explanations
 
@@ -83,13 +81,13 @@ AI-Terminal-X is powered by  **Google’s Gemini AI** , making it **exceptionall
 
 # 🔧 Installation
 
-### 1: 🔹 Must Install Required Modules
+### 1: 🔹 Install Required Modules
 
 ```sh
-
-pip install google-generativeai python-dotenv
-
+pip install -r requirements.txt
 ```
+
+(or run `python setup.py`, which creates a virtual environment and installs them there)
 
 ### 2: 🔹 Clone the Repository
 
@@ -131,17 +129,25 @@ Done!🚀
 ## 🛠️ Requirements
 
 * Python 3.8+
+* `tmux`, `xfce4-terminal` (and optionally `xclip` for copy-to-clipboard) on Linux
 * Gemini API Key (Get it [here](https://aistudio.google.com/apikey))
+
+## 🧪 Running the Tests
+
+```sh
+pip install pytest
+python -m pytest tests/ -v
+```
 
 ## 🔄 Update Notes for `Ai-Terminal-X`
 
 > 🚀 **Latest Improvements**
 >
-> * 🐞 **Bug Fixes:** Major installation issues resolved – now easier and smoother to install and run.
-> * 🌐 **Multi-language Support:** Now supports multiple languages for a broader user base.
-> * ✨More Enhanced Prompt
-> * 📝 **Text Input Upgrade:** Fixed the text overlapping issue – now supports multi-line input seamlessly.
-> * 💡 **Usability Enhancements:** Improved interface for a more user-friendly experience.
+> * 🐞 **Bug Fixes:** setup script no longer depends on `pv`, `run.sh` warns clearly if the venv is missing, and typos in helper messages fixed.
+> * 🧠 **Newer AI model:** now uses `gemini-2.0-flash` for command generation and risk checks.
+> * 🧪 **Tests added:** the suggestion parser and the explain-request detection are now covered by pytest.
+> * 🧹 **Cleaner internals:** dead code removed from the tmux sender, and the script is now safely importable (`if __name__ == "__main__"` guard).
+> * 🌐 **Multi-language Support:** understands requests in many languages and always explains in English.
 
 ### 🔐 Safety and Permissions
 

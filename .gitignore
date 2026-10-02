@@ -1,0 +1,13 @@
+# Ai-Terminal-X - Python dependencies
+__pycache__/
+*.pyc
+.pytest_cache/
+
+# Virtual environment created by setup.py
+venv/
+
+# API key (never commit the real one)
+.env
+
+# Command history log
+ai_cmd_x_history.log

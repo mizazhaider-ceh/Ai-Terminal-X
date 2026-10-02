@@ -1,0 +1,5 @@
+# Python dependencies for Ai-Terminal-X.
+# Install with: pip install -r requirements.txt
+# (or just run `python setup.py`, which installs these into a venv)
+google-generativeai>=0.8.0
+python-dotenv>=1.0.0

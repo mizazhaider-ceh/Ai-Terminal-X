@@ -44,6 +44,8 @@ VISUAL_TERMINAL = "xfce4-terminal" # Make sure this terminal supports the -e fla
 TMUX_HISTORY_LIMIT = 30000
 # the file where we expect to find the gemini api key.
 API_KEY_FILENAME = ".env"
+# the gemini model used for command generation and risk checks.
+AI_MODEL_NAME = "gemini-2.0-flash"
 # --- NEW/MODIFIED ---
 # the name of the helper script that gives command suggestions.
 COMMAND_SUGGESTER_SCRIPT = "command_suggester.py" # Name of the helper script
@@ -124,7 +126,7 @@ def configure_ai(api_key):
         # tell the google ai library about our key.
         genai.configure(api_key=api_key)
         # choose the specific ai model we want to use (flash is good for speed/cost).
-        model = genai.GenerativeModel("gemini-1.5-flash-latest")
+        model = genai.GenerativeModel(AI_MODEL_NAME)
         print(f"{green}Google AI configured successfully!{reset}"); return model
     except Exception as e:
         # uh oh, something went wrong during setup.
@@ -390,6 +392,26 @@ def explain_command(model, command_input):
         return f"{red}Error occurred while trying to get explanation.{reset}"
 
 
+# --- Function to detect explanation requests ---
+# checks whether the user's input is asking for an explanation
+# (e.g. "explain grep", "what is ssh"). returns a tuple:
+# (triggered, topic, matched_prefix). topic is None when the user
+# typed a prefix with nothing after it. kept separate so it is testable.
+def detect_explain_request(user_input):
+    """Detects 'explain <topic>' style requests. Returns (triggered, topic, prefix)."""
+    explain_prefixes = ("explain ", "what is ", "what's ", "tell me about ", "describe ")
+    user_input_lower = user_input.lower()
+    for prefix in explain_prefixes:
+        if user_input_lower.startswith(prefix):
+            # make sure there's something *after* the prefix.
+            if len(user_input) > len(prefix):
+                # extract the topic they want explained.
+                return True, user_input[len(prefix):].strip(), prefix
+            # they typed the prefix but nothing else.
+            return True, None, prefix
+    return False, None, None
+
+
 # --- Check for Required External Tools ---
 # (Keep the existing check_external_tools function)
 # makes sure the necessary command-line tools (tmux, terminal, xclip) are installed and findable.
@@ -412,7 +434,7 @@ def check_external_tools():
     # if any mandatory tools are missing, print an error and exit.
     if missing:
         print(f"{red}Error: Cannot find required command(s): {', '.join(missing)}.{reset}")
-        print(f"{yellow}Please Run {gold} pyhton setup.py{reset}then run {gold}bash run.sh{reset}")
+        print(f"{yellow}Please Run {gold} python setup.py{reset} then run {gold}bash run.sh{reset}")
         sys.exit(1)
 
     # report the tools that were found.
@@ -502,15 +524,8 @@ def send_command_to_tmux_viewer(session_name, command):
     # target the first pane (0.0) in the first window (0) of the session.
     target_pane = f"{session_name}:0.0" # Target the first window, first pane
     try:
-        # need to be careful about quotes within the command itself when sending to tmux.
-        # simple approach: wrap command in double quotes if it contains single quotes, otherwise use single quotes.
-        if "'" in command:
-            # escape any double quotes already inside the command.
-            tmux_command_arg = f'"{command.replace("\"", "\\\"")}"' # Escape double quotes inside
-        else:
-             # wrap with single quotes, usually safer.
-             tmux_command_arg = f"'{command}'" # Wrap with single quotes
-
+        # send-keys takes the command as a plain argument, so no shell
+        # quoting is needed here. tmux types it into the pane for us.
         # use 'tmux send-keys' to type the command into the target pane, followed by 'c-m' (ctrl+m, which is enter).
         send_args = [tmux_path_global, 'send-keys', '-t', target_pane, command, 'C-m'] # C-m is Enter
 
@@ -761,22 +776,23 @@ def handle_command_execution(ai_generated_command, primary_mode, execution_mode,
         print(f"{red}Internal Error: Unknown execution mode '{execution_mode}' in handle_command_execution.{reset}")
 
 
-# ==================================
-# === MAIN PROGRAM STARTS HERE ===
-# ==================================
-# ok, let's get things rolling.
-# --- Initial Setup ---
-print(f"{purple}--- Starting Ai-Terminal-X Assistant ---{reset}")
-# first, get the api key (exits if it fails).
-api_key = load_api_key()        # Exits if key not found/entered
-# next, configure the connection to the ai (exits if it fails).
-ai_model = configure_ai(api_key) # Exits if connection fails
-# then, check if the required external tools are installed (exits if not).
-check_external_tools() # exits if tools not installed properly
+if __name__ == "__main__":
+    # ==================================
+    # === MAIN PROGRAM STARTS HERE ===
+    # ==================================
+    # ok, let's get things rolling.
+    # --- Initial Setup ---
+    print(f"{purple}--- Starting Ai-Terminal-X Assistant ---{reset}")
+    # first, get the api key (exits if it fails).
+    api_key = load_api_key()        # Exits if key not found/entered
+    # next, configure the connection to the ai (exits if it fails).
+    ai_model = configure_ai(api_key) # Exits if connection fails
+    # then, check if the required external tools are installed (exits if not).
+    check_external_tools() # exits if tools not installed properly
 
-# --- Define and Print Banner ---
-# show a cool startup banner.
-banner = fr""" {green}
+    # --- Define and Print Banner ---
+    # show a cool startup banner.
+    banner = fr""" {green}
                     ⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⣀⣤⡴⠂⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀
                     {gold}Ai-Terminal-X{reset}{green}      ⢀⣠⣴⣿⠟⠉⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀
                     ⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⢀⣠⣶⣿⣿⣿⡅⠀⠀⠀⠀⠀⠀⠀⠀⢀⣀⣀⣀⣀⣀⣀⣀⣀⣀⠀⠀
@@ -806,398 +822,385 @@ banner = fr""" {green}
                 {cyan}========================================================={reset}
                 {blue} AI Assisted Linux Terminal Assistant {reset}|{gold} Revolution Begins {reset}
                 {cyan}========================================================={reset}"""
-print(banner)
+    print(banner)
 
-# --- Main Loop ---
-# the main loop that keeps asking the user for input until they quit.
-while True:
-    
-    # --- Stage 1: Select Primary Mode ---
-    # first, figure out what the user wants to do (quick, interactive, suggest, or exit).
-    primary_mode = None
-    # keep asking until they pick a valid mode.
-    while primary_mode is None:
-        
-        print(f"\n>>>> Choose Operating Mode <<<<\n")
-        print(f" {gold}[1] Quick Mode{reset}\t\t{blue}(AI generates command -> Risk Check -> Run if safe / Confirm if risky){reset}")
-        print(f" {gold}[2] Interactive Mode{reset}\t{blue}(AI generates command -> Risk Check -> Ask Run/Copy/Cancel){reset}")
-        # --- NEW/MODIFIED ---
-        print(f" {gold}[3] Command Suggester{reset}\t{blue}(AI suggests multiple commands for a task -> Display options){reset}")
-        print(f" {gold}[4] Exit{reset}\t\t\t{blue}(Quit the application){reset}")
-        choice1 = input(f"\n>>>> {green}Enter choice [1-4]: {reset}").strip()
-        
-        # set the primary_mode based on their choice.
-        if choice1 == "1":
-            primary_mode = "quick"
-        elif choice1 == "2": 
-            primary_mode = "interactive"
-        
-        # --- NEW/MODIFIED ---
-        elif choice1 == "3": 
-            primary_mode = "suggester"
-        elif choice1 == "4":
-            # if they choose 4, exit the whole script.
-            print(f"\n{red}Exiting Ai-Terminal-X. Goodbye!{reset}") 
-            sys.exit(0)
-        else:
-            # invalid choice, loop will ask again.
-            print(f"{red}Invalid choice. Please enter 1, 2, 3, or 4.{reset}")
-
-    # --- Stage 2: Select Execution Mode (Only if NOT Suggester Mode) ---
-    # --- NEW/MODIFIED --- (Conditional execution style selection)
-    # if they chose quick or interactive, ask *how* they want commands run (persistent or separate window).
-    execution_mode = None
-    exec_mode_friendly = None
-    
-    # only ask for execution style if we are in quick or interactive mode.
-    if primary_mode in ["quick", "interactive"]:
-        # this function will loop until they give a valid choice (1 or 2).
-        execution_mode = select_execution_mode() # This function loops until valid input
-        
-        # get a nice name for the chosen execution mode.
-        exec_mode_friendly = "Persistent Viewer" if execution_mode=="persistent_single_viewer" else "Separate Window"
-        
-        # confirm the selected modes to the user.
-        print(f"\n{blue}>>> Mode Selected: {reset}{gold}{primary_mode.capitalize()}{reset} {blue}with {reset}{gold}{exec_mode_friendly}{reset} {blue} Execution <<<{reset}")
-        
-        # Provide context-specific instructions based on execution mode.
-        if execution_mode == "persistent_single_viewer":
-            print(f"{green}\n>>>>Enter command. {red}Use Ctrl+C{reset} {green}here to interrupt running command | You can scroll in persistent mode by pressing{gold} ctrl + B then [{reset} {blue}ok.{reset}")
-        else: # Separate Window mode
-            print(f"{blue}\n>>>>Enter your command request. Each command will open in a new window that pauses.{reset}")
-       
-        # remind them of the control commands.
-        print(f"{gold}Type {reset}' explain <topic>/<command> '{green} for explanations, {reset}' back '{blue} to change modes, {reset}' quit '{red} to exit.{reset}")
-
-    elif primary_mode == "suggester":
-        # suggester mode doesn't need an execution style. just print a banner and instructions.
-        banner3 = f"""{blue}
-                ───▄▀▀▀▄▄▄▄▄▄▄▀▀▀▄───  {gold}Cool...I will give the Perfect Commands{reset}{blue}
-                ───█▒▒░░░░░░░░░▒▒█─── 
-                ────█░░█░░░░░█░░█────  {reset}"Learn, Practice and Master...You can do it.."{blue}
-                ─▄▄──█░░░▀█▀░░░█──▄▄─
-                █░░█─▀▄░░░░░░░▄▀─█░░█
-                {reset}
-            """
-        print(f"\n{banner3}")
-        print(f"\n{blue}>>> Mode Selected: {reset}{gold}Command Suggester{reset} {blue} <<<{reset}")
-        print(f"{green}\n>>>>Enter a task description{reset}{green} (e.g., 'find large files', 'check network connections'){reset}")
-        print(f"{gold}Type {reset}' back '{blue} to change modes, {reset}' quit '{red} to exit.{reset}")
-
-
-    # --- Inner Loop: Handle User Requests within the selected mode ---
-    # now we're in a specific mode, keep handling requests until they type 'back' or 'quit'.
+    # --- Main Loop ---
+    # the main loop that keeps asking the user for input until they quit.
     while True:
-        # STEP 1: Get User Input
-        # --- NEW/MODIFIED --- (Prompt based on mode)
-        # get the command request or control command from the user.
-        # display a prompt that shows the current mode.
-        if primary_mode == "suggester":
-             prompt_display = f"\nAi-Terminal-X (Expert Command Suggester)</> : "
-             
-        else: # Quick or Interactive
-             prompt_display = f"\nAi-Terminal-X ({primary_mode.capitalize()}/{exec_mode_friendly})</> :  "
-
-        try:
-            # wait for the user to type something and press enter.
-            user_input = input(prompt_display).strip()
-        except KeyboardInterrupt: # Catch Ctrl+C in *this* terminal (where Ai-Terminal-X runs)
-            # handle ctrl+c press in the main script's terminal.
-            print() # Newline after ^C
-            # --- NEW/MODIFIED --- (Interrupt logic applies only to persistent mode)
-            # if we are in persistent mode and the viewer is active, try to interrupt the command inside the viewer.
-            if primary_mode in ["quick", "interactive"] and execution_mode == "persistent_single_viewer" and persistent_viewer_active:
-                # Try to interrupt the command running *inside* the persistent viewer
-                if send_interrupt_to_tmux_viewer(TMUX_VIEWER_SESSION_NAME):
-                     print(f"{yellow}Interrupt (Ctrl+C) signal sent to persistent viewer. The command inside might take a moment to stop.{reset}")
-                else:
-                     print(f"{red}Failed to send interrupt signal to the viewer (it might be closed or unresponsive).{reset}")
-                # remind them they can enter another command or control word.
-                print(f"{cyan}You can enter your next request, '{purple}back{cyan}', or '{purple}quit{cyan}'.{reset}")
-                # continue to the next iteration of this inner loop, waiting for input again.
-                continue # Continue inner loop, ready for next input
-            else:
-                # if not in persistent mode, or viewer isn't active, ctrl+c here just exits the main script.
-                print(f"\n{red}Ctrl+C detected. Exiting Ai-Terminal-X.{reset}")
+    
+        # --- Stage 1: Select Primary Mode ---
+        # first, figure out what the user wants to do (quick, interactive, suggest, or exit).
+        primary_mode = None
+        # keep asking until they pick a valid mode.
+        while primary_mode is None:
+        
+            print(f"\n>>>> Choose Operating Mode <<<<\n")
+            print(f" {gold}[1] Quick Mode{reset}\t\t{blue}(AI generates command -> Risk Check -> Run if safe / Confirm if risky){reset}")
+            print(f" {gold}[2] Interactive Mode{reset}\t{blue}(AI generates command -> Risk Check -> Ask Run/Copy/Cancel){reset}")
+            # --- NEW/MODIFIED ---
+            print(f" {gold}[3] Command Suggester{reset}\t{blue}(AI suggests multiple commands for a task -> Display options){reset}")
+            print(f" {gold}[4] Exit{reset}\t\t\t{blue}(Quit the application){reset}")
+            choice1 = input(f"\n>>>> {green}Enter choice [1-4]: {reset}").strip()
+        
+            # set the primary_mode based on their choice.
+            if choice1 == "1":
+                primary_mode = "quick"
+            elif choice1 == "2": 
+                primary_mode = "interactive"
+        
+            # --- NEW/MODIFIED ---
+            elif choice1 == "3": 
+                primary_mode = "suggester"
+            elif choice1 == "4":
+                # if they choose 4, exit the whole script.
+                print(f"\n{red}Exiting Ai-Terminal-X. Goodbye!{reset}") 
                 sys.exit(0)
-        except EOFError: # Catch Ctrl+D
-            # handle ctrl+d (end of file), treat it as quitting.
-            print(f"\n{red}EOF detected. Exiting Ai-Terminal-X.{reset}")
-            sys.exit(0)
+            else:
+                # invalid choice, loop will ask again.
+                print(f"{red}Invalid choice. Please enter 1, 2, 3, or 4.{reset}")
 
-        # save the original input for logging purposes.
-        original_request = user_input # Keep original for logging/prompts
+        # --- Stage 2: Select Execution Mode (Only if NOT Suggester Mode) ---
+        # --- NEW/MODIFIED --- (Conditional execution style selection)
+        # if they chose quick or interactive, ask *how* they want commands run (persistent or separate window).
+        execution_mode = None
+        exec_mode_friendly = None
+    
+        # only ask for execution style if we are in quick or interactive mode.
+        if primary_mode in ["quick", "interactive"]:
+            # this function will loop until they give a valid choice (1 or 2).
+            execution_mode = select_execution_mode() # This function loops until valid input
+        
+            # get a nice name for the chosen execution mode.
+            exec_mode_friendly = "Persistent Viewer" if execution_mode=="persistent_single_viewer" else "Separate Window"
+        
+            # confirm the selected modes to the user.
+            print(f"\n{blue}>>> Mode Selected: {reset}{gold}{primary_mode.capitalize()}{reset} {blue}with {reset}{gold}{exec_mode_friendly}{reset} {blue} Execution <<<{reset}")
+        
+            # Provide context-specific instructions based on execution mode.
+            if execution_mode == "persistent_single_viewer":
+                print(f"{green}\n>>>>Enter command. {red}Use Ctrl+C{reset} {green}here to interrupt running command | You can scroll in persistent mode by pressing{gold} ctrl + B then [{reset} {blue}ok.{reset}")
+            else: # Separate Window mode
+                print(f"{blue}\n>>>>Enter your command request. Each command will open in a new window that pauses.{reset}")
+       
+            # remind them of the control commands.
+            print(f"{gold}Type {reset}' explain <topic>/<command> '{green} for explanations, {reset}' back '{blue} to change modes, {reset}' quit '{red} to exit.{reset}")
 
-        # --- Handle Control Commands FIRST (Common to all modes) ---
-        # check for special commands like 'quit' or 'back' first.
-        # ignore completely empty input.
-        if not user_input: continue # Ignore empty input
+        elif primary_mode == "suggester":
+            # suggester mode doesn't need an execution style. just print a banner and instructions.
+            banner3 = f"""{blue}
+                    ───▄▀▀▀▄▄▄▄▄▄▄▀▀▀▄───  {gold}Cool...I will give the Perfect Commands{reset}{blue}
+                    ───█▒▒░░░░░░░░░▒▒█─── 
+                    ────█░░█░░░░░█░░█────  {reset}"Learn, Practice and Master...You can do it.."{blue}
+                    ─▄▄──█░░░▀█▀░░░█──▄▄─
+                    █░░█─▀▄░░░░░░░▄▀─█░░█
+                    {reset}
+                """
+            print(f"\n{banner3}")
+            print(f"\n{blue}>>> Mode Selected: {reset}{gold}Command Suggester{reset} {blue} <<<{reset}")
+            print(f"{green}\n>>>>Enter a task description{reset}{green} (e.g., 'find large files', 'check network connections'){reset}")
+            print(f"{gold}Type {reset}' back '{blue} to change modes, {reset}' quit '{red} to exit.{reset}")
 
-        # convert input to lowercase for easier checking of control commands.
-        user_input_lower = user_input.lower()
 
-        # check for quit commands.
-        if user_input_lower in ["quit", "exit"]:
-            print(f"\n{red}Exiting Ai-Terminal-X as requested. Goodbye!{reset}")
-            sys.exit(0)
-        # check for the 'back' command.
-        if user_input_lower == "back":
-            print(f"{blue}\n<<< Returning to Mode Selection...{reset}")
-            # if the persistent viewer was active, warn the user it might still be running in the background.
-            if primary_mode in ["quick", "interactive"] and execution_mode == "persistent_single_viewer" and persistent_viewer_active:
-                 print(f"{yellow}Note: The Persistent viewer session '{TMUX_VIEWER_SESSION_NAME}' may still be open in its own window.{reset}")
-                 # Consider asking if they want to kill it? For simplicity, we won't auto-kill now.
-            # break out of this inner loop to go back to the outer mode selection loop.
-            break # Exit this inner loop to go back to the outer mode selection loop
+        # --- Inner Loop: Handle User Requests within the selected mode ---
+        # now we're in a specific mode, keep handling requests until they type 'back' or 'quit'.
+        while True:
+            # STEP 1: Get User Input
+            # --- NEW/MODIFIED --- (Prompt based on mode)
+            # get the command request or control command from the user.
+            # display a prompt that shows the current mode.
+            if primary_mode == "suggester":
+                 prompt_display = f"\nAi-Terminal-X (Expert Command Suggester)</> : "
+             
+            else: # Quick or Interactive
+                 prompt_display = f"\nAi-Terminal-X ({primary_mode.capitalize()}/{exec_mode_friendly})</> :  "
 
-        # --- === Mode-Specific Logic === ---
-
-        # --- NEW/MODIFIED --- (Suggester Mode Block)
-        # --- if in suggester mode ---
-        if primary_mode == "suggester":
-            # any input that isn't a control command is treated as a task description.
-            task_description = original_request
-            # find the path to the command suggester helper script.
-            script_dir = os.path.dirname(os.path.abspath(__file__))
-            suggester_script_path = os.path.join(script_dir, COMMAND_SUGGESTER_SCRIPT)
-
-            # make sure the helper script actually exists.
-            if not os.path.exists(suggester_script_path):
-                 print(f"\n{red}Error: Cannot find the command suggester script '{COMMAND_SUGGESTER_SCRIPT}'.{reset}")
-                 print(f"{red}Please ensure '{COMMAND_SUGGESTER_SCRIPT}' is in the same directory as this script ({script_dir}).{reset}")
-                 # go back and ask for input again.
-                 continue # Ask for input again in suggester mode
-
-            print(f"\n{blue}--- Asking AI for Suggestions via Helper Script ---{reset}")
-            print(f"{cyan}Task: {task_description}{reset}")
             try:
-                # run the helper script using the same python interpreter that's running this script.
-                # pass the task description as a command-line argument to the helper script.
-                args = [sys.executable, suggester_script_path, task_description]
-
-                # run the helper script, wait for it to finish, capture its output (stdout and stderr).
-                # use check=false so we can handle non-zero exit codes manually.
-                result = subprocess.run(args, capture_output=True, text=True, check=False, encoding='utf-8')
-
-                # print the standard output from the helper script (this should be the suggestions).
-                if result.stdout:
-                    print(result.stdout.strip()) # Display the suggestions
-                else:
-                    # if there's no stdout, maybe it only printed errors.
-                    print(f"{yellow}Suggestion script produced no standard output.{reset}")
-
-                # check if the helper script finished with an error code.
-                if result.returncode != 0:
-                    print(f"\n{red}--- Error From Suggester Script ---{reset}")
-                    print(f"{red}The suggester script ({COMMAND_SUGGESTER_SCRIPT}) exited with error code {result.returncode}.{reset}")
-                    # if there was error output (stderr), print that too.
-                    if result.stderr:
-                         print(f"{yellow}Suggester Script Error Output:{reset}\n{result.stderr.strip()}")
+                # wait for the user to type something and press enter.
+                user_input = input(prompt_display).strip()
+            except KeyboardInterrupt: # Catch Ctrl+C in *this* terminal (where Ai-Terminal-X runs)
+                # handle ctrl+c press in the main script's terminal.
+                print() # Newline after ^C
+                # --- NEW/MODIFIED --- (Interrupt logic applies only to persistent mode)
+                # if we are in persistent mode and the viewer is active, try to interrupt the command inside the viewer.
+                if primary_mode in ["quick", "interactive"] and execution_mode == "persistent_single_viewer" and persistent_viewer_active:
+                    # Try to interrupt the command running *inside* the persistent viewer
+                    if send_interrupt_to_tmux_viewer(TMUX_VIEWER_SESSION_NAME):
+                         print(f"{yellow}Interrupt (Ctrl+C) signal sent to persistent viewer. The command inside might take a moment to stop.{reset}")
                     else:
-                         print(f"{yellow}(No specific error message provided by the suggester script on stderr){reset}")
-                    print(f"{red}---------------------------------{reset}")
+                         print(f"{red}Failed to send interrupt signal to the viewer (it might be closed or unresponsive).{reset}")
+                    # remind them they can enter another command or control word.
+                    print(f"{cyan}You can enter your next request, '{purple}back{cyan}', or '{purple}quit{cyan}'.{reset}")
+                    # continue to the next iteration of this inner loop, waiting for input again.
+                    continue # Continue inner loop, ready for next input
+                else:
+                    # if not in persistent mode, or viewer isn't active, ctrl+c here just exits the main script.
+                    print(f"\n{red}Ctrl+C detected. Exiting Ai-Terminal-X.{reset}")
+                    sys.exit(0)
+            except EOFError: # Catch Ctrl+D
+                # handle ctrl+d (end of file), treat it as quitting.
+                print(f"\n{red}EOF detected. Exiting Ai-Terminal-X.{reset}")
+                sys.exit(0)
 
-            except FileNotFoundError:
-                 # this would mean python itself wasn't found, which is very unlikely.
-                 print(f"{red}Critical Error: Could not execute Python interpreter '{sys.executable}'. Is Python installed correctly?{reset}")
-            except Exception as e:
-                 # catch any other unexpected errors during the subprocess call.
-                 print(f"{red}An unexpected error occurred while trying to run the suggester script: {e}{reset}")
+            # save the original input for logging purposes.
+            original_request = user_input # Keep original for logging/prompts
 
-            # after running the suggester, just continue the inner loop to ask for the next task.
-            continue # After showing suggestions, prompt for the next task in Suggester mode
+            # --- Handle Control Commands FIRST (Common to all modes) ---
+            # check for special commands like 'quit' or 'back' first.
+            # ignore completely empty input.
+            if not user_input: continue # Ignore empty input
 
-        # --- Quick and Interactive Mode Logic ---
-        # --- NEW/MODIFIED --- (Encapsulated in elif)
-        # --- if in quick or interactive mode ---
-        elif primary_mode in ["quick", "interactive"]:
+            # convert input to lowercase for easier checking of control commands.
+            user_input_lower = user_input.lower()
 
-            # --- Handle Explanation Requests (Only in Quick/Interactive) ---
-            # check if the user input starts with "explain", "what is", etc.
-            explain_triggered = False
-            topic_to_explain = ""
-            explain_prefixes = ("explain ", "what is ", "what's ", "tell me about ","describe ")
-            for prefix in explain_prefixes:
-                if user_input_lower.startswith(prefix):
-                    # make sure there's something *after* the prefix.
-                    if len(user_input) > len(prefix):
-                        # extract the topic they want explained.
-                        topic_to_explain = user_input[len(prefix):].strip()
-                        explain_triggered = True
-                        break
-                    else: # Handle case like "explain " with nothing after
-                        # they typed "explain " but nothing else.
-                        print(f"{yellow}Please specify what you want explained after '{prefix.strip()}'.{reset}")
-                        explain_triggered = True # Treat as handled (invalid explain request)
-                        topic_to_explain = None # Signal no valid topic
-                        break
+            # check for quit commands.
+            if user_input_lower in ["quit", "exit"]:
+                print(f"\n{red}Exiting Ai-Terminal-X as requested. Goodbye!{reset}")
+                sys.exit(0)
+            # check for the 'back' command.
+            if user_input_lower == "back":
+                print(f"{blue}\n<<< Returning to Mode Selection...{reset}")
+                # if the persistent viewer was active, warn the user it might still be running in the background.
+                if primary_mode in ["quick", "interactive"] and execution_mode == "persistent_single_viewer" and persistent_viewer_active:
+                     print(f"{yellow}Note: The Persistent viewer session '{TMUX_VIEWER_SESSION_NAME}' may still be open in its own window.{reset}")
+                     # Consider asking if they want to kill it? For simplicity, we won't auto-kill now.
+                # break out of this inner loop to go back to the outer mode selection loop.
+                break # Exit this inner loop to go back to the outer mode selection loop
 
-            # if it was an explanation request...
-            if explain_triggered:
-                # ...and they provided a topic...
-                if topic_to_explain: # Only ask AI if we have a valid topic
-                    print(f"\n{blue}-------------- Getting Explanation --------------{reset}")
-                    # ...ask the ai for an explanation.
-                    explanation_text = explain_command(ai_model, topic_to_explain)
-                    # print the explanation nicely formatted.
-                    print(f"\n{gold}AI Explanation:\n{reset}")
-                    print(explanation_text) # Assumes explain_command includes color for errors
-                    print(f"{gold}--------------------------------------------------{reset}")
-                # after handling the explain request (or invalid explain), go back to ask for new input.
-                continue # Go to next prompt asking for input (skip command generation)
+            # --- === Mode-Specific Logic === ---
 
-            # --- Process Standard Command Request (Quick/Interactive) ---
-            # if it wasn't an explain request, it must be a request for a command.
-            # STEP 2: AI Command Generation
-            print(f"\n--- Generating Command ---")
-            # ask the ai to generate the command and explanation for the user's original request.
-            command_from_ai, explanation_from_ai, error_msg = gemini_command_and_explanation(ai_model, original_request)
+            # --- NEW/MODIFIED --- (Suggester Mode Block)
+            # --- if in suggester mode ---
+            if primary_mode == "suggester":
+                # any input that isn't a control command is treated as a task description.
+                task_description = original_request
+                # find the path to the command suggester helper script.
+                script_dir = os.path.dirname(os.path.abspath(__file__))
+                suggester_script_path = os.path.join(script_dir, COMMAND_SUGGESTER_SCRIPT)
 
-            # if there was an error getting the command (api error, parsing error, safety block)...
-            if error_msg:
-                print(error_msg) # Display error from AI comms/parsing
-                # ...go back and ask for new input.
-                continue # Ask for new input
-            # also double-check if the command itself is empty (should be caught by error_msg).
-            if not command_from_ai:
-                print(f"{red}AI did not provide a valid command.{reset}")
-                continue # Ask for new input
+                # make sure the helper script actually exists.
+                if not os.path.exists(suggester_script_path):
+                     print(f"\n{red}Error: Cannot find the command suggester script '{COMMAND_SUGGESTER_SCRIPT}'.{reset}")
+                     print(f"{red}Please ensure '{COMMAND_SUGGESTER_SCRIPT}' is in the same directory as this script ({script_dir}).{reset}")
+                     # go back and ask for input again.
+                     continue # Ask for input again in suggester mode
 
-            # STEP 3: Display AI Suggestion
-            # show the user what the ai came up with.
-            print(f"\n{gold}>>>{blue} Hayy Look Here ... {yellow}AI Suggests:{reset} {command_from_ai}") # Print command prominently
+                print(f"\n{blue}--- Asking AI for Suggestions via Helper Script ---{reset}")
+                print(f"{cyan}Task: {task_description}{reset}")
+                try:
+                    # run the helper script using the same python interpreter that's running this script.
+                    # pass the task description as a command-line argument to the helper script.
+                    args = [sys.executable, suggester_script_path, task_description]
+
+                    # run the helper script, wait for it to finish, capture its output (stdout and stderr).
+                    # use check=false so we can handle non-zero exit codes manually.
+                    result = subprocess.run(args, capture_output=True, text=True, check=False, encoding='utf-8')
+
+                    # print the standard output from the helper script (this should be the suggestions).
+                    if result.stdout:
+                        print(result.stdout.strip()) # Display the suggestions
+                    else:
+                        # if there's no stdout, maybe it only printed errors.
+                        print(f"{yellow}Suggestion script produced no standard output.{reset}")
+
+                    # check if the helper script finished with an error code.
+                    if result.returncode != 0:
+                        print(f"\n{red}--- Error From Suggester Script ---{reset}")
+                        print(f"{red}The suggester script ({COMMAND_SUGGESTER_SCRIPT}) exited with error code {result.returncode}.{reset}")
+                        # if there was error output (stderr), print that too.
+                        if result.stderr:
+                             print(f"{yellow}Suggester Script Error Output:{reset}\n{result.stderr.strip()}")
+                        else:
+                             print(f"{yellow}(No specific error message provided by the suggester script on stderr){reset}")
+                        print(f"{red}---------------------------------{reset}")
+
+                except FileNotFoundError:
+                     # this would mean python itself wasn't found, which is very unlikely.
+                     print(f"{red}Critical Error: Could not execute Python interpreter '{sys.executable}'. Is Python installed correctly?{reset}")
+                except Exception as e:
+                     # catch any other unexpected errors during the subprocess call.
+                     print(f"{red}An unexpected error occurred while trying to run the suggester script: {e}{reset}")
+
+                # after running the suggester, just continue the inner loop to ask for the next task.
+                continue # After showing suggestions, prompt for the next task in Suggester mode
+
+            # --- Quick and Interactive Mode Logic ---
+            # --- NEW/MODIFIED --- (Encapsulated in elif)
+            # --- if in quick or interactive mode ---
+            elif primary_mode in ["quick", "interactive"]:
+
+                # --- Handle Explanation Requests (Only in Quick/Interactive) ---
+                # check if the user input starts with "explain", "what is", etc.
+                explain_triggered, topic_to_explain, matched_prefix = detect_explain_request(user_input)
+
+                # if it was an explanation request...
+                if explain_triggered:
+                    # ...but they gave no topic after the prefix.
+                    if topic_to_explain is None:
+                        print(f"{yellow}Please specify what you want explained after '{matched_prefix.strip()}'.{reset}")
+                    # ...and they provided a topic...
+                    if topic_to_explain: # Only ask AI if we have a valid topic
+                        print(f"\n{blue}-------------- Getting Explanation --------------{reset}")
+                        # ...ask the ai for an explanation.
+                        explanation_text = explain_command(ai_model, topic_to_explain)
+                        # print the explanation nicely formatted.
+                        print(f"\n{gold}AI Explanation:\n{reset}")
+                        print(explanation_text) # Assumes explain_command includes color for errors
+                        print(f"{gold}--------------------------------------------------{reset}")
+                    # after handling the explain request (or invalid explain), go back to ask for new input.
+                    continue # Go to next prompt asking for input (skip command generation)
+
+                # --- Process Standard Command Request (Quick/Interactive) ---
+                # if it wasn't an explain request, it must be a request for a command.
+                # STEP 2: AI Command Generation
+                print(f"\n--- Generating Command ---")
+                # ask the ai to generate the command and explanation for the user's original request.
+                command_from_ai, explanation_from_ai, error_msg = gemini_command_and_explanation(ai_model, original_request)
+
+                # if there was an error getting the command (api error, parsing error, safety block)...
+                if error_msg:
+                    print(error_msg) # Display error from AI comms/parsing
+                    # ...go back and ask for new input.
+                    continue # Ask for new input
+                # also double-check if the command itself is empty (should be caught by error_msg).
+                if not command_from_ai:
+                    print(f"{red}AI did not provide a valid command.{reset}")
+                    continue # Ask for new input
+
+                # STEP 3: Display AI Suggestion
+                # show the user what the ai came up with.
+                print(f"\n{gold}>>>{blue} Hayy Look Here ... {yellow}AI Suggests:{reset} {command_from_ai}") # Print command prominently
             
-            # if there was an explanation, show that too.
-            if explanation_from_ai:
-                print(f"{gold}>>> {blue}Kindly Look at also {yellow}Explanation: {reset} {explanation_from_ai}")
-            else:
-                # mention if no explanation was found.
-                print(f" {yellow}Awww....(No explanation provided/parsed from AI){reset}")
+                # if there was an explanation, show that too.
+                if explanation_from_ai:
+                    print(f"{gold}>>> {blue}Kindly Look at also {yellow}Explanation: {reset} {explanation_from_ai}")
+                else:
+                    # mention if no explanation was found.
+                    print(f" {yellow}Awww....(No explanation provided/parsed from AI){reset}")
 
-            # STEP 4: AI Risk Check
-            # check if the ai thinks the command is risky.
-            print(f"\n{gold}>>> {green}Wait Safety Matters...{blue} Checking Command Risk...{reset}")
-            risk_explanation = validate_command_risk(ai_model, command_from_ai)
+                # STEP 4: AI Risk Check
+                # check if the ai thinks the command is risky.
+                print(f"\n{gold}>>> {green}Wait Safety Matters...{blue} Checking Command Risk...{reset}")
+                risk_explanation = validate_command_risk(ai_model, command_from_ai)
 
-            # STEP 5: Display Risk Assessment
-            # determine if it's risky based on whether validate_command_risk returned an explanation.
-            is_risky = bool(risk_explanation)
-            if is_risky:
-                 # use a stronger warning if the risk check itself failed or was blocked.
-                 if "treat as potentially risky" in risk_explanation:
-                     print(f"{yellow}\n‼ {red}CAUTION: AI RISK CHECK FAILED/BLOCKED!{reset}")
-                     print(f"{yellow}   Reason: {risk_explanation}{reset}")
-                     print(f"{yellow}   Treat the command as potentially dangerous.{reset}")
-                 else:
-                     # standard warning for a command assessed as risky.
-                     print(f"{yellow}\n>>> ‼ {red}RISKY COMMAND DETECTED!{reset}")
-                     print(f"\n{gold}>>>{green}   AI Risk Assessment: {yellow} {risk_explanation}{reset}")
-            else:
-                 # the command was assessed as safe.
-                 print(f"{blue}~~~ Command assessed as safe by AI .{reset}")
-
-            # STEP 6: Execution Decision (Based on primary_mode)
-            # decide whether to run the command based on the mode (quick/interactive) and risk.
-            run_now = False
-            cancel_action = False
-
-            # get a description of *how* it will be executed for the prompts.
-            exec_desc = f"in {exec_mode_friendly}" # e.g., "in Persistent Viewer"
-
-            # --- quick mode logic ---
-            if primary_mode == "quick": # QUICK MODE - Only ask confirmation for risky commands
+                # STEP 5: Display Risk Assessment
+                # determine if it's risky based on whether validate_command_risk returned an explanation.
+                is_risky = bool(risk_explanation)
                 if is_risky:
-                    # if risky, ask the user for confirmation (y/n).
+                     # use a stronger warning if the risk check itself failed or was blocked.
+                     if "treat as potentially risky" in risk_explanation:
+                         print(f"{yellow}\n‼ {red}CAUTION: AI RISK CHECK FAILED/BLOCKED!{reset}")
+                         print(f"{yellow}   Reason: {risk_explanation}{reset}")
+                         print(f"{yellow}   Treat the command as potentially dangerous.{reset}")
+                     else:
+                         # standard warning for a command assessed as risky.
+                         print(f"{yellow}\n>>> ‼ {red}RISKY COMMAND DETECTED!{reset}")
+                         print(f"\n{gold}>>>{green}   AI Risk Assessment: {yellow} {risk_explanation}{reset}")
+                else:
+                     # the command was assessed as safe.
+                     print(f"{blue}~~~ Command assessed as safe by AI .{reset}")
+
+                # STEP 6: Execution Decision (Based on primary_mode)
+                # decide whether to run the command based on the mode (quick/interactive) and risk.
+                run_now = False
+                cancel_action = False
+
+                # get a description of *how* it will be executed for the prompts.
+                exec_desc = f"in {exec_mode_friendly}" # e.g., "in Persistent Viewer"
+
+                # --- quick mode logic ---
+                if primary_mode == "quick": # QUICK MODE - Only ask confirmation for risky commands
+                    if is_risky:
+                        # if risky, ask the user for confirmation (y/n).
+                        while True:
+                            confirm = input(f"{red}\n Execute this risky command {exec_desc}? (y/n): {reset}").lower().strip()
+                            if confirm in ['y', 'yes']:
+                                # user said yes.
+                                print(f"{blue}Okay, proceeding with execution...{reset}")
+                                run_now = True
+                                break
+                            elif confirm in ['n', 'no']:
+                                # user said no.
+                                print(f"{gold}~ Execution cancelled by user.{reset}")
+                                cancel_action = True
+                                break
+                            else:
+                                # invalid input, ask again.
+                                print(f"{yellow}Invalid input. Please enter 'y' or 'n'.{reset}")
+                    else:
+                        # if safe in quick mode, run it automatically.
+                        print(f"{gold}\n (Quick Mode) Automatically running safe command {exec_desc}...{reset}")
+                        run_now = True
+
+                # --- interactive mode logic ---
+                elif primary_mode == "interactive": # INTERACTIVE MODE - Always ask for action
+                    # always ask the user what to do: run, copy (if available), or cancel.
+                    # build the options string dynamically.
+                    options = f"y=Run {exec_desc}"
+                    # check if xclip was found earlier.
+                    copy_option_available = xclip_path_global is not None
+                    if copy_option_available:
+                        # only add the copy option if xclip is available.
+                        options += ", c=Copy Command"
+                    options += ", n=Cancel"
+                    print("\n")
+                    # keep asking until they choose a valid action.
                     while True:
-                        confirm = input(f"{red}\n Execute this risky command {exec_desc}? (y/n): {reset}").lower().strip()
-                        if confirm in ['y', 'yes']:
-                            # user said yes.
-                            print(f"{blue}Okay, proceeding with execution...{reset}")
+                        action = input(f"{green}\n Action? ({options}): {reset}").lower().strip()
+
+                        if action in ["y", "yes"]:
+                            # user chose to run.
                             run_now = True
                             break
-                        elif confirm in ['n', 'no']:
-                            # user said no.
-                            print(f"{gold}~ Execution cancelled by user.{reset}")
+                        # only accept 'c' if the copy option is actually available.
+                        elif copy_option_available and action in ["c", "copy"]:
+                            try:
+                                # try to copy the command to the clipboard using xclip.
+                                # use popen and communicate to send the command text to xclip's input.
+                                p = subprocess.Popen([xclip_path_global, '-selection', 'clipboard'], stdin=subprocess.PIPE, text=True, encoding='utf-8')
+                                stdout, stderr = p.communicate(input=command_from_ai, timeout=5)
+                                # check if xclip ran successfully.
+                                if p.returncode == 0:
+                                     print(f"{green}\n Command copied to clipboard!{reset}")
+                                     # print(f"{purple}   {command_from_ai}{reset}") # Optionally show again
+                                else:
+                                     # xclip failed, report the error code and any stderr output.
+                                     error_detail = f" Stderr: {stderr.strip()}" if stderr else ""
+                                     print(f"{red}Copy failed. xclip exited with code {p.returncode}.{error_detail}{reset}")
+                            except subprocess.TimeoutExpired:
+                                # xclip took too long.
+                                print(f"{red}Copy failed: Timeout waiting for xclip.{reset}")
+                            except FileNotFoundError:
+                                 # xclip wasn't found (shouldn't happen if initial check passed).
+                                 print(f"{red}Copy failed: Command 'xclip' not found? This shouldn't happen if check_external_tools worked.{reset}")
+                            except Exception as e:
+                                # some other error during the copy attempt.
+                                print(f"{red}Copy failed with unexpected error: {e}{reset}")
+                            # copying means we don't run the command now.
+                            cancel_action = True # Copying implies we don't run it now
+                            break
+                        elif action in ["n", "no", "cancel"]:
+                            # user chose to cancel.
+                            print(f"{gold}\n~ Action cancelled by user.{reset}")
                             cancel_action = True
                             break
                         else:
-                            # invalid input, ask again.
-                            print(f"{yellow}Invalid input. Please enter 'y' or 'n'.{reset}")
+                            # invalid input, remind them of the valid options.
+                            print(f"{yellow}Invalid input. Please choose from the available options ({options}).{reset}")
+
+                # STEP 7: Execute Command (If Approved in Step 6)
+                # if the logic above decided we should run the command...
+                if run_now:
+                    # ...call the execution handler function.
+                    handle_command_execution(command_from_ai, primary_mode, execution_mode, original_request)
+                elif cancel_action:
+                    # if the action was cancelled or they chose copy, do nothing here.
+                    pass # Do nothing further, loop will ask for next input
                 else:
-                    # if safe in quick mode, run it automatically.
-                    print(f"{gold}\n (Quick Mode) Automatically running safe command {exec_desc}...{reset}")
-                    run_now = True
+                    # this state shouldn't normally be reached.
+                    print(f"{yellow}Internal warning: Command action was not decided. Not running command.{reset}")
 
-            # --- interactive mode logic ---
-            elif primary_mode == "interactive": # INTERACTIVE MODE - Always ask for action
-                # always ask the user what to do: run, copy (if available), or cancel.
-                # build the options string dynamically.
-                options = f"y=Run {exec_desc}"
-                # check if xclip was found earlier.
-                copy_option_available = xclip_path_global is not None
-                if copy_option_available:
-                    # only add the copy option if xclip is available.
-                    options += ", c=Copy Command"
-                options += ", n=Cancel"
-                print("\n")
-                # keep asking until they choose a valid action.
-                while True:
-                    action = input(f"{green}\n Action? ({options}): {reset}").lower().strip()
+            # --- End of mode-specific logic ---
 
-                    if action in ["y", "yes"]:
-                        # user chose to run.
-                        run_now = True
-                        break
-                    # only accept 'c' if the copy option is actually available.
-                    elif copy_option_available and action in ["c", "copy"]:
-                        try:
-                            # try to copy the command to the clipboard using xclip.
-                            # use popen and communicate to send the command text to xclip's input.
-                            p = subprocess.Popen([xclip_path_global, '-selection', 'clipboard'], stdin=subprocess.PIPE, text=True, encoding='utf-8')
-                            stdout, stderr = p.communicate(input=command_from_ai, timeout=5)
-                            # check if xclip ran successfully.
-                            if p.returncode == 0:
-                                 print(f"{green}\n Command copied to clipboard!{reset}")
-                                 # print(f"{purple}   {command_from_ai}{reset}") # Optionally show again
-                            else:
-                                 # xclip failed, report the error code and any stderr output.
-                                 error_detail = f" Stderr: {stderr.strip()}" if stderr else ""
-                                 print(f"{red}Copy failed. xclip exited with code {p.returncode}.{error_detail}{reset}")
-                        except subprocess.TimeoutExpired:
-                            # xclip took too long.
-                            print(f"{red}Copy failed: Timeout waiting for xclip.{reset}")
-                        except FileNotFoundError:
-                             # xclip wasn't found (shouldn't happen if initial check passed).
-                             print(f"{red}Copy failed: Command 'xclip' not found? This shouldn't happen if check_external_tools worked.{reset}")
-                        except Exception as e:
-                            # some other error during the copy attempt.
-                            print(f"{red}Copy failed with unexpected error: {e}{reset}")
-                        # copying means we don't run the command now.
-                        cancel_action = True # Copying implies we don't run it now
-                        break
-                    elif action in ["n", "no", "cancel"]:
-                        # user chose to cancel.
-                        print(f"{gold}\n~ Action cancelled by user.{reset}")
-                        cancel_action = True
-                        break
-                    else:
-                        # invalid input, remind them of the valid options.
-                        print(f"{yellow}Invalid input. Please choose from the available options ({options}).{reset}")
-
-            # STEP 7: Execute Command (If Approved in Step 6)
-            # if the logic above decided we should run the command...
-            if run_now:
-                # ...call the execution handler function.
-                handle_command_execution(command_from_ai, primary_mode, execution_mode, original_request)
-            elif cancel_action:
-                # if the action was cancelled or they chose copy, do nothing here.
-                pass # Do nothing further, loop will ask for next input
-            else:
-                # this state shouldn't normally be reached.
-                print(f"{yellow}Internal warning: Command action was not decided. Not running command.{reset}")
-
-        # --- End of mode-specific logic ---
-
-# --- End of Main Loop ---
-# just a final message if the script somehow exits the main loop normally (shouldn't really happen).
-print(f"\n{purple}Ai-Terminal-X loop ended.{reset}")
+    # --- End of Main Loop ---
+    # just a final message if the script somehow exits the main loop normally (shouldn't really happen).
+    print(f"\n{purple}Ai-Terminal-X loop ended.{reset}")

@@ -25,6 +25,7 @@ gold = "\033[38;5;220m"; cyan = "\033[36m"; yellow = "\033[93m"; reset = "\033[0
 
 # --- 3. Configuration (Settings) ---
 API_KEY_FILENAME = ".env" # The name of the secret file where we expect to find the API key.
+AI_MODEL_NAME = "gemini-2.0-flash" # The Gemini model used for suggestions.
 
 # --- 4. Recipe: Loading Your Secret API Key ---
 # This defines a reusable set of instructions (a function) called 'load_api_key'.
@@ -73,8 +74,8 @@ def configure_ai(api_key):
         # Tell the Google AI toolkit about your key
         genai.configure(api_key=api_key)
         # Choose the specific AI model (like choosing a specific brain) we want to talk to
-        # 'gemini-1.5-flash-latest' is a good, fast choice.
-        model = genai.GenerativeModel("gemini-1.5-flash-latest")
+        # 'gemini-2.0-flash' is a good, fast choice.
+        model = genai.GenerativeModel(AI_MODEL_NAME)
         # If successful, send the ready-to-use model back
         return model
     except Exception as e: # If anything went wrong in the 'try' block...

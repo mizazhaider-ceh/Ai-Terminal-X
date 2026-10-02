@@ -48,8 +48,12 @@ def create_run_script():
     print(f">>>>{gold} Creating run.sh to auto-activate venv and launch the tool...{reset}")
     script_content = """#!/bin/bash
 # Activate virtual environment and run the main script
+if [ ! -f venv/bin/activate ]; then
+    echo "Virtual environment not found. Run 'python setup.py' first."
+    exit 1
+fi
 source venv/bin/activate
-echo "Starting the Powerful Ai-Based Linux Terminal....." | pv -qL 35
+echo "Starting the Powerful Ai-Based Linux Terminal....."
 python ai-terminal-x.py
 """
     with open("run.sh", "w") as f:
